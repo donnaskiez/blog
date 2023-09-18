@@ -13,16 +13,16 @@
 <meta property="og:site_name" content="donnaskiez.dev">
 <meta property="og:description" content="IntroductionMemory scanning is a very common forensics tool used by anti cheats, security experts and any other parties looking to analyse what is or has been running on a system. Here, we will be us">
 <meta property="og:locale" content="en_US">
-<meta property="og:image" content="https://donnaskiez.github.io/blog/images/intelpaging.png">
-<meta property="og:image" content="https://donnaskiez.github.io/blog/images/intelimage2.png">
+<meta property="og:image" content="https://donnaskiez.github.io/blog/2023/09/18/How-to-Scan-Physical-Memory-to-Find-Windows-Process-Allocations/intelpaging.png">
+<meta property="og:image" content="https://donnaskiez.github.io/blog/2023/09/18/How-to-Scan-Physical-Memory-to-Find-Windows-Process-Allocations/intelimage2.png">
 <meta property="article:published_time" content="2023-09-18T13:45:51.000Z">
-<meta property="article:modified_time" content="2023-09-18T15:44:32.420Z">
+<meta property="article:modified_time" content="2023-09-18T16:44:46.700Z">
 <meta property="article:author" content="John Doe">
 <meta property="article:tag" content="Windows Internals">
 <meta property="article:tag" content="Anti-Cheat">
 <meta property="article:tag" content="Kernel Programming">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:image" content="https://donnaskiez.github.io/blog/images/intelpaging.png">
+<meta name="twitter:image" content="https://donnaskiez.github.io/blog/2023/09/18/How-to-Scan-Physical-Memory-to-Find-Windows-Process-Allocations/intelpaging.png">
     
     
       
@@ -79,7 +79,7 @@
      --><!--
        --><li><a href="/blog/archives/">Writing</a></li><!--
      --><!--
-       --><li><a target="_blank" rel="noopener" href="http://github.com/probberechts">Projects</a></li><!--
+       --><li><a href="/blog/projects/">Projects</a></li><!--
      -->
       </ul>
     </span>
@@ -138,7 +138,7 @@
 
     <div class="meta">
       <span class="author p-author h-card" itemprop="author" itemscope itemtype="http://schema.org/Person">
-        <span class="p-name" itemprop="name">Lachlan Hodges</span>
+        <span class="p-name" itemprop="name">donna</span>
       </span>
       
     <div class="postdate">
@@ -252,9 +252,11 @@
 <h2 id="An-Introduction-to-Memory-Paging"><a href="#An-Introduction-to-Memory-Paging" class="headerlink" title="An Introduction to Memory Paging"></a>An Introduction to Memory Paging</h2><p>Paging is a memory management scheme which allows a process’ physical address space to be non-contiguous while the virtual address space still appearing to be contiguous. This has many benefits, and is the reason all modern operating systems use the paging model, with the main benefit being reduced memory fragmentation allowing the operating system to maximise the utilisation of available memory. </p>
 <!-- TOC --><a name="intel-paging-structure"></a>
 <h3 id="Intel-Paging-Structure"><a href="#Intel-Paging-Structure" class="headerlink" title="Intel Paging Structure"></a>Intel Paging Structure</h3><p>The focus of this article is on intel based windows systems, so we will be using the intel paging structure, which is defined as follows:</p>
-<p><img src="https://donnaskiez.github.io/blog/images/intelpaging.png" alt="Intel 4 level paging structure"></p>
+<img src="/blog/2023/09/18/How-to-Scan-Physical-Memory-to-Find-Windows-Process-Allocations/intelpaging.png" class="" title="intel paging">
+
 <p>As we can see from the diagram above, intels paging structure uses 4 levels, meaning there are 4 page tables - each page table is equal to <code>4096</code> bytes and stores <code>512</code> addresses (<code>512 * 8 = 4096</code>) which gives a virtual address the ability to reference <code>512^4</code> pages. Each entry in a page contains the physical address of the base of the next table in the structure as well as important information such as whether or not the page its pointing to is present in memory, whether it points to a large page and so on. This information is described in the following diagram:</p>
-<p><img src="https://donnaskiez.github.io/blog/images/intelimage2.png" alt="Intel page entry stuff"></p>
+<img src="/blog/2023/09/18/How-to-Scan-Physical-Memory-to-Find-Windows-Process-Allocations/intelimage2.png" class="" title="intel page address structure">
+
 <p> So for example, if we dereference a <code>PML4 entry</code> we get the base physical address of the <code>PDPT</code> table and so on. To get the base address of the <code>PML4</code> table, we need to use a subset of the <code>cr3</code> register. This register value can be broken down as follows:</p>
 <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">union</span> _<span class="title">DIRECTORY_TABLE_BASE</span></span></span><br><span class="line"><span class="class">&#123;</span></span><br><span class="line">    <span class="class"><span class="keyword">struct</span></span></span><br><span class="line"><span class="class">    &#123;</span></span><br><span class="line">        UINT64 Ignored0         : <span class="number">3</span>;    <span class="comment">/* 2:0   */</span></span><br><span class="line">        UINT64 PageWriteThrough : <span class="number">1</span>;    <span class="comment">/* 3     */</span></span><br><span class="line">        UINT64 PageCacheDisable : <span class="number">1</span>;    <span class="comment">/* 4     */</span></span><br><span class="line">        UINT64 _Ignored1        : <span class="number">7</span>;    <span class="comment">/* 11:5  */</span></span><br><span class="line">        UINT64 PhysicalAddress  : <span class="number">36</span>;   <span class="comment">/* 47:12 */</span></span><br><span class="line">        UINT64 _Reserved0       : <span class="number">16</span>;   <span class="comment">/* 63:48 */</span></span><br><span class="line">    &#125; Bits;</span><br><span class="line">    UINT64 BitAddress;</span><br><span class="line">&#125; CR3, *PCR3;</span><br></pre></td></tr></table></figure>
 
@@ -343,7 +345,7 @@
         
           <li><a href="/blog/archives/">Writing</a></li>
         
-          <li><a target="_blank" rel="noopener" href="http://github.com/probberechts">Projects</a></li>
+          <li><a href="/blog/projects/">Projects</a></li>
         
       </ul>
     </div>
@@ -387,9 +389,9 @@
         
         <footer id="footer">
   <div class="footer-left">
-    <a style="text-decoration:none;" target="_blank" rel="noopener" href="https://github.com/donnaskiez" class="fa-brands fa-github fa-2x"></a>
-    <a style="text-decoration:none;" target="_blank" rel="noopener" href="https://twitter.com/donnaskiez" class="fa-brands fa-twitter fa-2x"></a>
-    <a style="text-decoration:none;" target="_blank" rel="noopener" href="https://www.linkedin.com/in/lachlan-hodges-818210244/" class="fa-brands fa-linkedin fa-2x"></a>
+    <a style="text-decoration:none; scale = 1.5;" target="_blank" rel="noopener" href="https://github.com/donnaskiez" class="fa-brands fa-github"></a>
+    <a style="text-decoration:none;" target="_blank" rel="noopener" href="https://twitter.com/donnaskiez" class="fa-brands fa-twitter"></a>
+    <a style="text-decoration:none;" target="_blank" rel="noopener" href="https://www.linkedin.com/in/lachlan-hodges-818210244/" class="fa-brands fa-linkedin"></a>
   </div>
   <div class="footer-right">
     <nav>
@@ -401,7 +403,7 @@
      --><!--
        --><li><a href="/blog/archives/">Writing</a></li><!--
      --><!--
-       --><li><a target="_blank" rel="noopener" href="http://github.com/probberechts">Projects</a></li><!--
+       --><li><a href="/blog/projects/">Projects</a></li><!--
      -->
       </ul>
     </nav>

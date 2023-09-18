@@ -1100,7 +1100,6 @@ article header .meta * {
   font-size: 0.85rem;
 }
 article header .author {
-  text-transform: uppercase;
   letter-spacing: 0.01em;
   font-weight: 700;
 }
